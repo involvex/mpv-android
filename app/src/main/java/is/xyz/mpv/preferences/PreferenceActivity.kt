@@ -16,6 +16,7 @@ import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.PreferenceManager
 import com.google.android.material.color.DynamicColors
 import `is`.xyz.mpv.R
+import `is`.xyz.mpv.ThemeManager
 
 class PreferenceActivity : AppCompatActivity(),
     PreferenceFragmentCompat.OnPreferenceStartFragmentCallback,
@@ -73,10 +74,17 @@ class PreferenceActivity : AppCompatActivity(),
     }
 
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {
-        if (key != "material_you_theming") return
-        if (sharedPreferences.getBoolean(key, false))
-            DynamicColors.applyToActivityIfAvailable(this)
-        recreate()
+        when (key) {
+            "material_you_theming" -> {
+                if (sharedPreferences.getBoolean(key, false))
+                    DynamicColors.applyToActivityIfAvailable(this)
+                recreate()
+            }
+            "theme_mode" -> {
+                val themeMode = sharedPreferences.getString(key, "0")?.toIntOrNull() ?: 0
+                ThemeManager.setThemeMode(themeMode)
+            }
+        }
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {

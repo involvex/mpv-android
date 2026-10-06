@@ -10,3 +10,5 @@ obj
 build/
 local.properties
 *~
+*.log
+node_modules

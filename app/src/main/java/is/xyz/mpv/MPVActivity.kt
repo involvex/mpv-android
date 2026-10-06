@@ -33,6 +33,9 @@ import android.view.ViewGroup.MarginLayoutParams
 import android.widget.Button
 import android.widget.SeekBar
 import android.widget.Toast
+import android.widget.AutoCompleteTextView
+import android.widget.ListView
+import android.widget.ArrayAdapter
 import androidx.activity.addCallback
 import androidx.annotation.DrawableRes
 import androidx.annotation.IdRes
@@ -1431,6 +1434,12 @@ class MPVActivity : AppCompatActivity(), MPVLib.EventObserver, TouchGesturesObse
                     autoRotationMode = "manual"
                     cycleOrientation()
                     true
+                },
+                MenuItem(R.id.commandLineBtn) {
+                    openCommandLine(); false
+                },
+                MenuItem(R.id.youtubeBtn) {
+                    openYouTubeSearch(); false
                 }
         )
 
@@ -1441,6 +1450,131 @@ class MPVActivity : AppCompatActivity(), MPVLib.EventObserver, TouchGesturesObse
         /******/
 
         genericMenu(R.layout.dialog_top_menu, buttons, hiddenButtons, restoreState)
+    }
+
+    private fun openCommandLine() {
+        val dialogView = layoutInflater.inflate(R.layout.fragment_command_line, null)
+        
+        val commandInput = dialogView.findViewById<AutoCompleteTextView>(R.id.command_input)
+        val outputList = dialogView.findViewById<ListView>(R.id.output_list)
+        val executeButton = dialogView.findViewById<Button>(R.id.execute_button)
+        val clearButton = dialogView.findViewById<Button>(R.id.clear_button)
+        
+        val outputLines = mutableListOf<String>()
+        val commandHistory = mutableListOf<String>()
+        var historyIndex = -1
+        
+        val commonCommands = listOf(
+            "play", "pause", "stop", "quit", "seek", "set", "show-text",
+            "volume", "mute", "fullscreen", "sub-add", "sub-select",
+            "audio-add", "audio-select", "playlist-next", "playlist-prev"
+        )
+        
+        val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, commonCommands)
+        commandInput.setAdapter(adapter)
+        
+        val outputAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, outputLines)
+        outputList.adapter = outputAdapter
+        
+        fun addOutput(line: String) {
+            outputLines.add(line)
+            outputAdapter.notifyDataSetChanged()
+            outputList.setSelection(outputLines.size - 1)
+        }
+        
+        fun executeCommand() {
+            val input = commandInput.text.toString().trim()
+            if (input.isEmpty()) return
+            
+            commandHistory.add(input)
+            historyIndex = -1
+            
+            val parts = input.split(" ", limit = 2)
+            val cmd = parts[0].lowercase()
+            val args = if (parts.size > 1) parts[1] else ""
+            
+            try {
+                val result = when (cmd) {
+                    "play" -> { MPVLib.command(arrayOf("play")); "Playing" }
+                    "pause" -> { MPVLib.command(arrayOf("pause")); "Paused" }
+                    "stop" -> { MPVLib.command(arrayOf("stop")); "Stopped" }
+                    "quit" -> { MPVLib.command(arrayOf("quit")); "Quit requested" }
+                    "seek" -> { MPVLib.command(arrayOf("seek", args.ifEmpty { "10" })); "Seeked" }
+                    "volume" -> { val vol = args.ifEmpty { "100" }; MPVLib.setPropertyString("volume", vol); "Volume: $vol" }
+                    "mute" -> { val current = MPVLib.getPropertyBoolean("mute") ?: false; MPVLib.setPropertyBoolean("mute", !current); "Mute: ${!current}" }
+                    "fullscreen" -> { val current = MPVLib.getPropertyBoolean("fullscreen") ?: false; MPVLib.setPropertyBoolean("fullscreen", !current); "Fullscreen: ${!current}" }
+                    "set" -> { val setArgs = args.split(" ", limit = 2); if (setArgs.size == 2) { MPVLib.setOptionString(setArgs[0], setArgs[1]); "Set ${setArgs[0]} = ${setArgs[1]}" } else "Usage: set <property> <value>" }
+                    "get" -> { val value = MPVLib.getPropertyString(args); "$args = $value" }
+                    "show-text" -> { MPVLib.command(arrayOf("show-text", args.ifEmpty { "Hello!" })); "Text displayed" }
+                    "playlist-next" -> { MPVLib.command(arrayOf("playlist-next")); "Next track" }
+                    "playlist-prev" -> { MPVLib.command(arrayOf("playlist-prev")); "Previous track" }
+                    "ab-loop" -> { MPVLib.command(arrayOf("ab-loop")); "A-B loop toggled" }
+                    "frame-step" -> { MPVLib.command(arrayOf("frame-step")); "Frame step forward" }
+                    "frame-back-step" -> { MPVLib.command(arrayOf("frame-back-step")); "Frame step backward" }
+                    "help" -> buildString {
+                        appendLine("Commands: play, pause, stop, quit")
+                        appendLine("seek <sec>, volume <0-100>, mute")
+                        appendLine("fullscreen, set <prop> <val>")
+                        appendLine("get <prop>, show-text <msg>")
+                        appendLine("playlist-next/prev, ab-loop")
+                        appendLine("frame-step, frame-back-step")
+                    }
+                    else -> "Unknown: $cmd. Type 'help'."
+                }
+                
+                addOutput("> $input")
+                addOutput(result)
+            } catch (e: Exception) {
+                addOutput("Error: ${e.message}")
+            }
+            
+            commandInput.text.clear()
+        }
+        
+        executeButton.setOnClickListener { executeCommand() }
+        
+        clearButton.setOnClickListener {
+            outputLines.clear()
+            outputAdapter.notifyDataSetChanged()
+        }
+        
+        commandInput.setOnKeyListener { _, keyCode, event ->
+            if (event.action == android.view.KeyEvent.ACTION_DOWN) {
+                when (keyCode) {
+                    android.view.KeyEvent.KEYCODE_DPAD_UP -> {
+                        if (commandHistory.isNotEmpty()) {
+                            historyIndex = (historyIndex + 1).coerceAtMost(commandHistory.size - 1)
+                            commandInput.setText(commandHistory[commandHistory.size - 1 - historyIndex])
+                            commandInput.setSelection(commandInput.text.length)
+                        }
+                        true
+                    }
+                    android.view.KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        if (historyIndex > 0) {
+                            historyIndex--
+                            commandInput.setText(commandHistory[commandHistory.size - 1 - historyIndex])
+                            commandInput.setSelection(commandInput.text.length)
+                        } else if (historyIndex == 0) {
+                            historyIndex = -1
+                            commandInput.setText("")
+                        }
+                        true
+                    }
+                    android.view.KeyEvent.KEYCODE_ENTER -> {
+                        executeCommand()
+                        true
+                    }
+                    else -> false
+                }
+            } else false
+        }
+        
+        AlertDialog.Builder(this)
+            .setTitle(R.string.command_line)
+            .setView(dialogView)
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .create()
+            .show()
     }
 
     private fun genericPickerDialog(
@@ -1466,6 +1600,99 @@ class MPVActivity : AppCompatActivity(), MPVLib.EventObserver, TouchGesturesObse
 
         picker.number = MPVLib.getPropertyDouble(property)
         dialog.show()
+    }
+
+    private fun openYouTubeSearch() {
+        val dialogView = layoutInflater.inflate(R.layout.fragment_youtube_search, null)
+        
+        val searchInput = dialogView.findViewById<AutoCompleteTextView>(R.id.youtube_search_input)
+        val resultsList = dialogView.findViewById<ListView>(R.id.youtube_results_list)
+        val searchButton = dialogView.findViewById<Button>(R.id.youtube_search_button)
+        
+        val searchResults = mutableListOf<YouTubeVideo>()
+        val resultsAdapter = YouTubeResultsAdapter(this, searchResults)
+        resultsList.adapter = resultsAdapter
+        
+        searchButton.setOnClickListener {
+            val query = searchInput.text.toString().trim()
+            if (query.isNotEmpty()) {
+                searchYouTube(query) { videos ->
+                    searchResults.clear()
+                    searchResults.addAll(videos)
+                    resultsAdapter.notifyDataSetChanged()
+                }
+            }
+        }
+        
+        resultsList.setOnItemClickListener { _, _, position, _ ->
+            val video = searchResults[position]
+            playYouTubeVideo(video)
+        }
+        
+        AlertDialog.Builder(this)
+            .setTitle(R.string.youtube_search)
+            .setView(dialogView)
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .create()
+            .show()
+    }
+    
+    private fun searchYouTube(query: String, callback: (List<YouTubeVideo>) -> Unit) {
+        // Simple search using YouTube URL pattern - for production use YouTube Data API
+        // This is a basic implementation that parses search results
+        Thread {
+            try {
+                val videos = mutableListOf<YouTubeVideo>()
+                val url = "https://www.youtube.com/results?search_query=${java.net.URLEncoder.encode(query, "UTF-8")}"
+                val connection = java.net.URL(url).openConnection()
+                connection.setRequestProperty("User-Agent", "Mozilla/5.0")
+                val html = connection.inputStream.bufferedReader().readText()
+                
+                // Parse video IDs and titles from HTML
+                val pattern = """"videoId":"([^"]+)".*?"title":{"runs":\[{"text":"([^"]+)"}]""".toRegex()
+                val matches = pattern.findAll(html)
+                
+                var count = 0
+                for (match in matches) {
+                    if (count >= 10) break // Limit to 10 results
+                    val videoId = match.groupValues[1]
+                    val title = match.groupValues[2].replace("\\", "").replace("\"", "")
+                    videos.add(YouTubeVideo(videoId, title, "https://i.ytimg.com/vi/$videoId/default.jpg"))
+                    count++
+                }
+                
+                runOnUiThread { callback(videos) }
+            } catch (e: Exception) {
+                runOnUiThread { callback(emptyList()) }
+            }
+        }.start()
+    }
+    
+    private fun playYouTubeVideo(video: YouTubeVideo) {
+        // Play video using mpv with yt-dlp or direct stream
+        // For audio-only, use bestaudio format
+        val videoUrl = "https://www.youtube.com/watch?v=${video.id}"
+        
+        // Use yt-dlp format selector for best audio
+        MPVLib.command(arrayOf("loadfile", videoUrl, "replace", "ytdl-format=bestaudio"))
+        
+        Toast.makeText(this, "Playing: ${video.title}", Toast.LENGTH_SHORT).show()
+    }
+    
+    data class YouTubeVideo(val id: String, val title: String, val thumbnail: String)
+    
+    inner class YouTubeResultsAdapter(context: Context, private val videos: List<YouTubeVideo>) :
+        ArrayAdapter<YouTubeVideo>(context, android.R.layout.simple_list_item_2, videos) {
+        
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+            val view = convertView ?: layoutInflater.inflate(android.R.layout.simple_list_item_2, parent, false)
+            val video = videos[position]
+            
+            view.findViewById<android.widget.TextView>(android.R.id.text1).text = video.title
+            view.findViewById<android.widget.TextView>(android.R.id.text2).text = "YouTube"
+            
+            return view
+        }
     }
 
     private fun openAdvancedMenu(restoreState: StateRestoreCallback) {
